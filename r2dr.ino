@@ -11,6 +11,8 @@ const int16_t LineSensorMax = 1000;
 QTRSensorsRC lineSensors((unsigned char[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
 uint16_t lineSensorValues[NumLineSensors];
 
+const uint16_t MaxSpeed = 100;
+
 DRV8835 driveMotors(7, 5, 8, 6);
 
 Encoder lwEnc(18, 19);
@@ -22,8 +24,8 @@ enum { WaitForButton, FindLine, StartFollowLine, FollowLine, Decel, GoHome, Done
 
 int16_t ls, rs;
 
-const int16_t AngleScale = 20000;
-const uint16_t StepsPerRadian = 810; //TODO: tune
+const uint16_t AngleScale = 20000;
+const uint16_t StepsPerRadian = 1200; //TODO: tune
 
 int16_t c = AngleScale;
 int16_t s = 0;
@@ -43,7 +45,7 @@ void setup()
 }
 
 void loop()
-{//updateWheelEncoders();return;
+{
   static uint16_t millisInitial = 0;
   static int16_t lsInitial, rsInitial;
   
@@ -66,7 +68,7 @@ void loop()
     case FindLine:
     {
       int16_t s = (millis() - millisInitial) / 4;
-      if (s <= 255)
+      if (s <= MaxSpeed)
         driveMotors.setSpeeds(s, s);
         
       lineSensors.readCalibrated(lineSensorValues);
@@ -120,6 +122,8 @@ void loop()
       
       if (ls == 0 && rs == 0)
       {
+        printDebug();
+        Serial.println("end of line");
         double r = hypot((double)x, (double)y);
         double nx = (double)x/r; // x = cos(tt)
         double ny = (double)y/r; // y = sin(tt)
@@ -129,6 +133,9 @@ void loop()
         s = new_s;
         y = 0;
         x = -r;
+        printDebug();
+        
+        btn.waitForButton();
         state = GoHome;
       }
     }
@@ -141,17 +148,20 @@ void loop()
         else if (s < 0)
           driveMotors.setSpeeds(-50, 50);
           
-          if (abs(s) < 500)
-          {
+        if (abs(s) < 500)
+        {
+          printDebug();
+          Serial.println("facing home");
+          btn.waitForButton();
+            
           driveMotors.setSpeeds(80, 80);
           while(x < -500)
           {
             updateWheelEncoders();
-            
           }
           driveMotors.setSpeeds(0, 0);
           while(1);
-          }
+        }
     }
     break;
   }
@@ -170,33 +180,42 @@ void setLineSensorCalibration()
 
 void updateWheelEncoders()
 {
-  int8_t lCount = lwEnc.read();
-  int8_t rCount = rwEnc.read();
+  static int8_t prevLCount = 0, prevRCount = 0;
   
-  if (lCount != 0)
+  int8_t dLCount = (int8_t)(lwEnc.read() - prevLCount);
+  int8_t dRCount = (int8_t)(rwEnc.read() - prevRCount);
+  
+  if (dLCount != 0)
   {
-    int16_t dc = + divide(lCount*s - lCount*c/2/StepsPerRadian, StepsPerRadian);
-    int16_t ds = - divide(lCount*c + lCount*s/2/StepsPerRadian, StepsPerRadian);
+    int16_t dc = + divide(dLCount*s - dLCount*c/2/StepsPerRadian, StepsPerRadian);
+    int16_t ds = - divide(dLCount*c + dLCount*s/2/StepsPerRadian, StepsPerRadian);
   
     c += dc;
     s += ds;
-    x += lCount * c;
-    y += lCount * s;
+    x += dLCount * c;
+    y += dLCount * s;
     
-    lwEnc.write(0);
+    prevLCount += dLCount;
   }
   
-  if (rCount != 0)
+  if (dRCount != 0)
   {
-    int16_t dc = - divide(rCount*s + rCount*c/2/StepsPerRadian, StepsPerRadian);
-    int16_t ds = + divide(rCount*c - rCount*s/2/StepsPerRadian, StepsPerRadian);
+    int16_t dc = - divide(dRCount*s + dRCount*c/2/StepsPerRadian, StepsPerRadian);
+    int16_t ds = + divide(dRCount*c - dRCount*s/2/StepsPerRadian, StepsPerRadian);
     
     c += dc;
     s += ds;
-    x += rCount * c;
-    y += rCount * s;
+    x += dRCount * c;
+    y += dRCount * s;
   
-    rwEnc.write(0);
+    prevRCount += dRCount;
+  }
+  
+  static uint16_t lastPrint = 0;
+  if ((uint16_t)(millis() - lastPrint) > 1000)
+  {
+    printDebug();
+    lastPrint = millis();
   }
 }
 
@@ -240,23 +259,33 @@ void followLine()
 
   // Compute the actual motor settings.  We never set either motor
   // to a negative value.
-  const int16_t max = 255, diff_max = max;
-  if(power_difference > diff_max)
-    power_difference = diff_max;
-  if(power_difference < -diff_max)
-    power_difference = -diff_max;
+  const int16_t MaxDiff = MaxSpeed;
+  if(power_difference > MaxDiff)
+    power_difference = MaxDiff;
+  if(power_difference < -MaxDiff)
+    power_difference = -MaxDiff;
 
   if(power_difference < 0)
   {
-    ls = max + power_difference;
-    rs = max;
+    ls = MaxSpeed + power_difference;
+    rs = MaxSpeed;
   }
   else
   {
-    ls = max;
-    rs = max - power_difference;
+    ls = MaxSpeed;
+    rs = MaxSpeed - power_difference;
   }
   driveMotors.setSpeeds(ls, rs);
 }
 
-
+void printDebug()
+{
+  Serial.print(s); Serial.print("\t");
+  Serial.print(c); Serial.print("\t");
+  Serial.print(hypot(s, c)); Serial.print("\t");
+  Serial.print(atan2(s, c) * 180 / PI); Serial.print("\t");
+  Serial.print(x); Serial.print("\t");
+  Serial.print(y); Serial.print("\t");
+  Serial.println();
+  
+}
