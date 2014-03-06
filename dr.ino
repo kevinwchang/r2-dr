@@ -20,18 +20,23 @@ Pushbutton btn(0);
 
 enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } state;
 
+short ls, rs;
+
 void setup()
 {
   Serial.begin(115200);
   setLineSensorCalibration();
   driveMotors.init(23437);
   
+  pinMode(13, OUTPUT);
+  
   state = WaitForButton;
 }
 
 void loop()
 {
-  static unsigned short millisStart = 0;
+  static unsigned short millisInitial = 0;
+  static short lsInitial, rsInitial;
   
   switch(state)
   {
@@ -40,21 +45,21 @@ void loop()
       btn.waitForButton();
       delay(1000);
       state = FindLine;
-      millisStart = millis();
+      millisInitial = millis();
     }
     break;
 
     case FindLine:
     {
-      short s = (millis() - millisStart) / 4;
-      if (s > 255)
-        s = 255;
-      driveMotors.setSpeeds(s, s);
+      short s = (millis() - millisInitial) / 4;
+      if (s <= 255)
+        driveMotors.setSpeeds(s, s);
+        
       lineSensors.readCalibrated(lineSensorValues);
       if (onLine())
       {
         state = StartFollowLine;
-        millisStart = millis();
+        millisInitial = millis();
       }
     }
     break;
@@ -62,6 +67,45 @@ void loop()
     case StartFollowLine:
     {
       followLine();
+      if ((millis() - millisInitial) > 2000)
+      {
+        state = FollowLine;
+        digitalWrite(13, HIGH);
+      }
+    }
+    break;
+    
+    case FollowLine:
+    {
+      followLine();
+      if (!onLine())
+      {
+        state = GoHome;
+        millisInitial = millis();
+        lsInitial = ls;
+        rsInitial = rs;
+        digitalWrite(13, LOW);
+      }
+    }
+    break;
+    
+    case GoHome:
+    {
+      // decel by subtracting 1 from original speeds every 4 ms
+      short ds = (millis() - millisInitial) / 4;
+      
+      ls = lsInitial - ds;
+      if (ls < 0)
+        ls = 0;
+        
+      rs = rsInitial - ds;
+      if (rs < 0)
+        rs = 0;
+        
+      driveMotors.setSpeeds(ls, rs);
+      
+      if (ls == 0 && rs == 0)
+        state = Done;
     }
     break;
   }
@@ -80,7 +124,7 @@ void setLineSensorCalibration()
 
 boolean onLine()
 {
-  return (lineSensorValues[0] > 500) || (lineSensorValues[1] > 500);
+  return (lineSensorValues[0] > 500) || (lineSensorValues[1] > 500) || (lineSensorValues[2] > 500);
 }
 
 void followLine()
@@ -109,7 +153,7 @@ void followLine()
   // to the right.  If it is a negative number, the robot will
   // turn to the left, and the magnitude of the number determines
   // the sharpness of the turn.
-  short power_difference = proportional/5;// + derivative*6;
+  short power_difference = proportional/4;// + derivative*6;
 
   // Compute the actual motor settings.  We never set either motor
   // to a negative value.
@@ -120,9 +164,16 @@ void followLine()
     power_difference = -diff_max;
 
   if(power_difference < 0)
-    driveMotors.setSpeeds(max + power_difference, max);
+  {
+    ls = max + power_difference;
+    rs = max;
+  }
   else
-    driveMotors.setSpeeds(max, max - power_difference);
+  {
+    ls = max;
+    rs = max - power_difference;
+  }
+  driveMotors.setSpeeds(ls, rs);
 }
 
 
