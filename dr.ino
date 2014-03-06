@@ -3,11 +3,13 @@
 #include <Encoder.h>
 #include <Pushbutton.h>
 
-#define NUM_LINE_SENSORS 3
-#define TIMEOUT     1000
+const byte NumLineSensors = 3;
+const short LineSensorTimeout = 1000;
+const short LineSensorMin = 200;
+const short LineSensorMax = 1000;
 
-QTRSensorsRC lineSensors((byte[]) {14, 15, 16}, NUM_LINE_SENSORS, TIMEOUT);
-unsigned short lineSensorValues[NUM_LINE_SENSORS];
+QTRSensorsRC lineSensors((byte[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
+unsigned short lineSensorValues[NumLineSensors];
 
 DRV8835 driveMotors(7, 5, 8, 6);
 
@@ -16,16 +18,7 @@ Encoder rwEnc(21, 20);
 
 Pushbutton btn(0);
 
-void setLineSensorCalibration()
-{
-  lineSensors.calibrate(); // force allocate calibrated values
-  
-  for (byte i = 0; i < NUM_LINE_SENSORS; i++)
-  {
-    lineSensors.calibratedMinimumOn[i] = 200;
-    lineSensors.calibratedMaximumOn[i] = 1000;
-  }
-}
+enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } state;
 
 void setup()
 {
@@ -33,11 +26,64 @@ void setup()
   setLineSensorCalibration();
   driveMotors.init(23437);
   
-  btn.waitForButton();
-  delay(1000);
+  state = WaitForButton;
 }
 
 void loop()
+{
+  static unsigned short millisStart = 0;
+  
+  switch(state)
+  {
+    case WaitForButton:
+    {
+      btn.waitForButton();
+      delay(1000);
+      state = FindLine;
+      millisStart = millis();
+    }
+    break;
+
+    case FindLine:
+    {
+      short s = (millis() - millisStart) / 4;
+      if (s > 255)
+        s = 255;
+      driveMotors.setSpeeds(s, s);
+      lineSensors.readCalibrated(lineSensorValues);
+      if (onLine())
+      {
+        state = StartFollowLine;
+        millisStart = millis();
+      }
+    }
+    break;
+      
+    case StartFollowLine:
+    {
+      followLine();
+    }
+    break;
+  }
+}
+
+void setLineSensorCalibration()
+{
+  lineSensors.calibrate(); // force allocate calibrated values
+  
+  for (byte i = 0; i < NumLineSensors; i++)
+  {
+    lineSensors.calibratedMinimumOn[i] = LineSensorMin;
+    lineSensors.calibratedMaximumOn[i] = LineSensorMax;
+  }
+}
+
+boolean onLine()
+{
+  return (lineSensorValues[0] > 500) || (lineSensorValues[1] > 500);
+}
+
+void followLine()
 {
   static unsigned short last_proportional = 0;
   static long integral = 0;
@@ -78,3 +124,5 @@ void loop()
   else
     driveMotors.setSpeeds(max, max - power_difference);
 }
+
+
