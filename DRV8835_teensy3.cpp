@@ -1,7 +1,6 @@
 #include "DRV8835_teensy3.h"
-#include <Arduino.h>
 
-void DRV8835::init(long frequency)
+void DRV8835::init(uint32_t frequency)
 {
   pinMode(_DIRA, OUTPUT);
   pinMode(_DIRB, OUTPUT);
@@ -10,9 +9,9 @@ void DRV8835::init(long frequency)
   analogWriteFrequency(_PWMB, frequency);
 }
 
-void DRV8835::setMASpeed(short speed)
+void DRV8835::setMASpeed(int16_t speed)
 {
-  byte reverse = 0;
+  uint8_t reverse = 0;
   
   if (speed < 0)
   {
@@ -26,9 +25,9 @@ void DRV8835::setMASpeed(short speed)
   digitalWrite(_DIRA, reverse);
 }
 
-void DRV8835::setMBSpeed(short speed)
+void DRV8835::setMBSpeed(int16_t speed)
 {
-  byte reverse = 0;
+  uint8_t reverse = 0;
   
   if (speed < 0)
   {
@@ -42,7 +41,7 @@ void DRV8835::setMBSpeed(short speed)
   digitalWrite(_DIRB, reverse);
 }
 
-void DRV8835::setSpeeds(short mASpeed, short mBSpeed)
+void DRV8835::setSpeeds(int16_t mASpeed, int16_t mBSpeed)
 {
   setMASpeed(mASpeed);
   setMBSpeed(mBSpeed);

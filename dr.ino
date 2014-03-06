@@ -3,13 +3,13 @@
 #include <Encoder.h>
 #include <Pushbutton.h>
 
-const byte NumLineSensors = 3;
-const short LineSensorTimeout = 1000;
-const short LineSensorMin = 200;
-const short LineSensorMax = 1000;
+const uint8_t NumLineSensors = 3;
+const int16_t LineSensorTimeout = 1000;
+const int16_t LineSensorMin = 200;
+const int16_t LineSensorMax = 1000;
 
-QTRSensorsRC lineSensors((byte[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
-unsigned short lineSensorValues[NumLineSensors];
+QTRSensorsRC lineSensors((unsigned char[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
+uint16_t lineSensorValues[NumLineSensors];
 
 DRV8835 driveMotors(7, 5, 8, 6);
 
@@ -18,9 +18,18 @@ Encoder rwEnc(21, 20);
 
 Pushbutton btn(0);
 
-enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } state;
+enum { WaitForButton, FindLine, StartFollowLine, FollowLine, Decel, GoHome, Done } state;
 
-short ls, rs;
+int16_t ls, rs;
+
+const int16_t AngleScale = 20000;
+const uint16_t StepsPerRadian = 810; //TODO: tune
+
+int16_t c = AngleScale;
+int16_t s = 0;
+int32_t x = 0, y = 0;
+
+#define sign(x) ((x) < 0 ? -1 : 1)
 
 void setup()
 {
@@ -34,9 +43,12 @@ void setup()
 }
 
 void loop()
-{
-  static unsigned short millisInitial = 0;
-  static short lsInitial, rsInitial;
+{//updateWheelEncoders();return;
+  static uint16_t millisInitial = 0;
+  static int16_t lsInitial, rsInitial;
+  
+  if (state != WaitForButton)
+    updateWheelEncoders();
   
   switch(state)
   {
@@ -44,6 +56,8 @@ void loop()
     {
       btn.waitForButton();
       delay(1000);
+      lwEnc.write(0);
+      rwEnc.write(0);
       state = FindLine;
       millisInitial = millis();
     }
@@ -51,7 +65,7 @@ void loop()
 
     case FindLine:
     {
-      short s = (millis() - millisInitial) / 4;
+      int16_t s = (millis() - millisInitial) / 4;
       if (s <= 255)
         driveMotors.setSpeeds(s, s);
         
@@ -80,7 +94,7 @@ void loop()
       followLine();
       if (!onLine())
       {
-        state = GoHome;
+        state = Decel;
         millisInitial = millis();
         lsInitial = ls;
         rsInitial = rs;
@@ -89,10 +103,10 @@ void loop()
     }
     break;
     
-    case GoHome:
+    case Decel:
     {
       // decel by subtracting 1 from original speeds every 4 ms
-      short ds = (millis() - millisInitial) / 4;
+      int16_t ds = (millis() - millisInitial) / 4;
       
       ls = lsInitial - ds;
       if (ls < 0)
@@ -105,7 +119,39 @@ void loop()
       driveMotors.setSpeeds(ls, rs);
       
       if (ls == 0 && rs == 0)
-        state = Done;
+      {
+        double r = hypot((double)x, (double)y);
+        double nx = (double)x/r; // x = cos(tt)
+        double ny = (double)y/r; // y = sin(tt)
+        int32_t new_c = -nx*c-ny*s; // -cos(tt)*cos(f)-sin(tt)*sin(f) = -cos(tt-f) = cos(180-(tt+f))
+        int32_t new_s = ny*c-nx*s; // sin(tt)*cos(f)-cos(tt)*sin(f) = sin(tt-f) = sin(180 - (tt+f))
+        c = new_c;
+        s = new_s;
+        y = 0;
+        x = -r;
+        state = GoHome;
+      }
+    }
+    break;
+    
+    case GoHome:
+    {
+        if (s > 0 || (s == 0 && c < 0))
+          driveMotors.setSpeeds(50, -50);
+        else if (s < 0)
+          driveMotors.setSpeeds(-50, 50);
+          
+          if (abs(s) < 500)
+          {
+          driveMotors.setSpeeds(80, 80);
+          while(x < -500)
+          {
+            updateWheelEncoders();
+            
+          }
+          driveMotors.setSpeeds(0, 0);
+          while(1);
+          }
     }
     break;
   }
@@ -115,11 +161,48 @@ void setLineSensorCalibration()
 {
   lineSensors.calibrate(); // force allocate calibrated values
   
-  for (byte i = 0; i < NumLineSensors; i++)
+  for (uint8_t i = 0; i < NumLineSensors; i++)
   {
     lineSensors.calibratedMinimumOn[i] = LineSensorMin;
     lineSensors.calibratedMaximumOn[i] = LineSensorMax;
   }
+}
+
+void updateWheelEncoders()
+{
+  int8_t lCount = lwEnc.read();
+  int8_t rCount = rwEnc.read();
+  
+  if (lCount != 0)
+  {
+    int16_t dc = + divide(lCount*s - lCount*c/2/StepsPerRadian, StepsPerRadian);
+    int16_t ds = - divide(lCount*c + lCount*s/2/StepsPerRadian, StepsPerRadian);
+  
+    c += dc;
+    s += ds;
+    x += lCount * c;
+    y += lCount * s;
+    
+    lwEnc.write(0);
+  }
+  
+  if (rCount != 0)
+  {
+    int16_t dc = - divide(rCount*s + rCount*c/2/StepsPerRadian, StepsPerRadian);
+    int16_t ds = + divide(rCount*c - rCount*s/2/StepsPerRadian, StepsPerRadian);
+    
+    c += dc;
+    s += ds;
+    x += rCount * c;
+    y += rCount * s;
+  
+    rwEnc.write(0);
+  }
+}
+
+int16_t divide(int16_t a, int16_t b)
+{
+  return (a + sign(a)*(b/2-1)) / b;
 }
 
 boolean onLine()
@@ -129,20 +212,20 @@ boolean onLine()
 
 void followLine()
 {
-  static unsigned short last_proportional = 0;
+  static uint16_t last_proportional = 0;
   static long integral = 0;
   
   // Get the position of the line.  Note that we *must* provide
   // the "sensors" argument to read_line() here, even though we
   // are not interested in the individual sensor readings.
-  unsigned short position = lineSensors.readLine(lineSensorValues);
+  uint16_t position = lineSensors.readLine(lineSensorValues);
 
   // The "proportional" term should be 0 when we are on the line.
-  short proportional = ((int)position) - 1000;
+  int16_t proportional = ((int)position) - 1000;
 
   // Compute the derivative (change) and integral (sum) of the
   // position.
-  short derivative = proportional - last_proportional;
+  int16_t derivative = proportional - last_proportional;
   integral += proportional;
 
   // Remember the last position.
@@ -153,11 +236,11 @@ void followLine()
   // to the right.  If it is a negative number, the robot will
   // turn to the left, and the magnitude of the number determines
   // the sharpness of the turn.
-  short power_difference = proportional/4;// + derivative*6;
+  int16_t power_difference = proportional/4;// + derivative*6;
 
   // Compute the actual motor settings.  We never set either motor
   // to a negative value.
-  const short max = 255, diff_max = max;
+  const int16_t max = 255, diff_max = max;
   if(power_difference > diff_max)
     power_difference = diff_max;
   if(power_difference < -diff_max)
