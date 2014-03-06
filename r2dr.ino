@@ -11,7 +11,7 @@ const int16_t LineSensorMax = 1000;
 QTRSensorsRC lineSensors((unsigned char[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
 uint16_t lineSensorValues[NumLineSensors];
 
-const uint16_t MaxSpeed = 100;
+const uint16_t MaxSpeed = 255;
 
 DRV8835 driveMotors(7, 5, 8, 6);
 
@@ -25,7 +25,7 @@ enum { WaitForButton, FindLine, StartFollowLine, FollowLine, Decel, GoHome, Done
 int16_t ls, rs;
 
 const uint16_t AngleScale = 20000;
-const uint16_t StepsPerRadian = 1200; //TODO: tune
+const uint16_t StepsPerRadian = 1025; //TODO: tune
 
 int16_t c = AngleScale;
 int16_t s = 0;
@@ -46,6 +46,8 @@ void setup()
 
 void loop()
 {
+  //Serial.print(lwEnc.read());Serial.print("\t");Serial.println(rwEnc.read());delay(100);return;
+  //static int count=0;count++;updateWheelEncoders();if(count>100){printDebug();count=0;}return;
   static uint16_t millisInitial = 0;
   static int16_t lsInitial, rsInitial;
   
@@ -124,18 +126,10 @@ void loop()
       {
         printDebug();
         Serial.println("end of line");
-        double r = hypot((double)x, (double)y);
-        double nx = (double)x/r; // x = cos(tt)
-        double ny = (double)y/r; // y = sin(tt)
-        int32_t new_c = -nx*c-ny*s; // -cos(tt)*cos(f)-sin(tt)*sin(f) = -cos(tt-f) = cos(180-(tt+f))
-        int32_t new_s = ny*c-nx*s; // sin(tt)*cos(f)-cos(tt)*sin(f) = sin(tt-f) = sin(180 - (tt+f))
-        c = new_c;
-        s = new_s;
-        y = 0;
-        x = -r;
+        
+        transform();
         printDebug();
         
-        btn.waitForButton();
         state = GoHome;
       }
     }
@@ -150,9 +144,10 @@ void loop()
           
         if (abs(s) < 500)
         {
+          driveMotors.setSpeeds(0, 0);
           printDebug();
           Serial.println("facing home");
-          btn.waitForButton();
+          //btn.waitForButton();
             
           driveMotors.setSpeeds(80, 80);
           while(x < -500)
@@ -200,8 +195,8 @@ void updateWheelEncoders()
   
   if (dRCount != 0)
   {
-    int16_t dc = - divide(dRCount*s + dRCount*c/2/StepsPerRadian, StepsPerRadian);
-    int16_t ds = + divide(dRCount*c - dRCount*s/2/StepsPerRadian, StepsPerRadian);
+    int16_t dc = - divide((int32_t)dRCount*s + (int32_t)dRCount*c/2/StepsPerRadian, StepsPerRadian);
+    int16_t ds = + divide((int32_t)dRCount*c - (int32_t)dRCount*s/2/StepsPerRadian, StepsPerRadian);
     
     c += dc;
     s += ds;
@@ -219,9 +214,22 @@ void updateWheelEncoders()
   }
 }
 
-int16_t divide(int16_t a, int16_t b)
+int32_t divide(int32_t a, int32_t b)
 {
   return (a + sign(a)*(b/2-1)) / b;
+}
+
+void transform()
+{
+  double r = hypot((double)x, (double)y);
+  double nx = (double)x/r; // x = cos(tt)
+  double ny = (double)y/r; // y = sin(tt)
+  int32_t new_c = -nx*c-ny*s; // -cos(tt)*cos(f)-sin(tt)*sin(f) = -cos(tt-f) = cos(180-(tt+f))
+  int32_t new_s = ny*c-nx*s; // sin(tt)*cos(f)-cos(tt)*sin(f) = sin(tt-f) = sin(180 - (tt+f))
+  c = new_c;
+  s = new_s;
+  y = 0;
+  x = -r;
 }
 
 boolean onLine()
