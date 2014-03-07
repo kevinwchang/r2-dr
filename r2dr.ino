@@ -20,12 +20,16 @@ Encoder rwEnc(21, 20);
 
 Pushbutton btn(0);
 
-enum { WaitForButton, FindLine, StartFollowLine, FollowLine, Decel, GoHome, Done } state;
+enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } state;
 
 int16_t ls, rs;
 
 const uint16_t AngleScale = 20000;
-const uint16_t StepsPerRadian = 1025; //TODO: tune
+const uint16_t StepsPerRadian = 1025;
+const uint8_t LeapTickPerL = 0;
+const uint8_t LeapTickPerR = 200;
+const int32_t FollowMaxY = 13000000L;
+const int16_t FollowMaxS = 15000L;
 
 int16_t c = AngleScale;
 int16_t s = 0;
@@ -51,7 +55,7 @@ void loop()
   static uint16_t millisInitial = 0;
   static int16_t lsInitial, rsInitial;
   
-  if (state != WaitForButton)
+  if (state != WaitForButton && state != Done)
     updateWheelEncoders();
   
   switch(state)
@@ -98,7 +102,13 @@ void loop()
       followLine();
       if (!onLine())
       {
-        state = Decel;
+        printDebug();
+        Serial.println("end of line");
+        
+        transform();
+        printDebug();
+        
+        state = GoHome;
         millisInitial = millis();
         lsInitial = ls;
         rsInitial = rs;
@@ -107,56 +117,19 @@ void loop()
     }
     break;
     
-    case Decel:
+    case GoHome:
     {
-      // decel by subtracting 1 from original speeds every 4 ms
-      int16_t ds = (millis() - millisInitial) / 4;
-      
-      ls = lsInitial - ds;
-      if (ls < 0)
-        ls = 0;
-        
-      rs = rsInitial - ds;
-      if (rs < 0)
-        rs = 0;
-        
-      driveMotors.setSpeeds(ls, rs);
-      
-      if (ls == 0 && rs == 0)
+      goHome();
+      if(x > -5000000)
       {
-        printDebug();
-        Serial.println("end of line");
-        
-        transform();
-        printDebug();
-        
-        state = GoHome;
+        state = Done;
       }
     }
     break;
     
-    case GoHome:
+    case Done:
     {
-        if (s > 0 || (s == 0 && c < 0))
-          driveMotors.setSpeeds(50, -50);
-        else if (s < 0)
-          driveMotors.setSpeeds(-50, 50);
-          
-        if (abs(s) < 500)
-        {
-          driveMotors.setSpeeds(0, 0);
-          printDebug();
-          Serial.println("facing home");
-          //btn.waitForButton();
-            
-          driveMotors.setSpeeds(80, 80);
-          while(x < -500)
-          {
-            updateWheelEncoders();
-          }
-          driveMotors.setSpeeds(0, 0);
-          while(1);
-        }
+      driveMotors.setSpeeds(0, 0);
     }
     break;
   }
@@ -176,6 +149,7 @@ void setLineSensorCalibration()
 void updateWheelEncoders()
 {
   static int8_t prevLCount = 0, prevRCount = 0;
+  static uint8_t leapLCount = 0, leapRCount = 0;
   
   int8_t dLCount = (int8_t)(lwEnc.read() - prevLCount);
   int8_t dRCount = (int8_t)(rwEnc.read() - prevRCount);
@@ -191,6 +165,16 @@ void updateWheelEncoders()
     y += dLCount * s;
     
     prevLCount += dLCount;
+    
+    if (LeapTickPerL > 0)
+    {
+      leapLCount += dLCount;
+      if (leapLCount >= LeapTickPerL)
+      {
+        prevLCount -= 1;
+        leapLCount -= LeapTickPerL;
+      }
+    }
   }
   
   if (dRCount != 0)
@@ -204,10 +188,20 @@ void updateWheelEncoders()
     y += dRCount * s;
   
     prevRCount += dRCount;
+    
+    if (LeapTickPerR > 0)
+    {
+      leapRCount += dRCount;
+      if (leapRCount >= LeapTickPerR)
+      {
+        prevRCount -= 1;
+        leapRCount -= LeapTickPerR;
+      }
+    }
   }
   
   static uint16_t lastPrint = 0;
-  if ((uint16_t)(millis() - lastPrint) > 1000)
+  if ((uint16_t)(millis() - lastPrint) > 500)
   {
     printDebug();
     lastPrint = millis();
@@ -230,6 +224,31 @@ void transform()
   s = new_s;
   y = 0;
   x = -r;
+}
+
+void goHome()
+{
+  int16_t speed = MaxSpeed;
+  int32_t err;
+  
+  if(x > -20000000)
+    speed = min(MaxSpeed/2, speed);
+  
+  if(c < 0)
+  {
+    // pointed backwards
+    err = (s > 0 ? speed/2 : -speed/2);
+  }
+  else
+  {    
+    int32_t target_s = -max(min(y / 10000 * FollowMaxS / (FollowMaxY / 10000), FollowMaxS), -FollowMaxS);
+    err = (s - target_s)/100;
+    err = max(min(err,speed),-speed);
+  }
+  if(err > 0)
+    driveMotors.setSpeeds(speed, speed - err);
+  else
+    driveMotors.setSpeeds(speed + err, speed);
 }
 
 boolean onLine()
