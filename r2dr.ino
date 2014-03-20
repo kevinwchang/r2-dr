@@ -11,10 +11,8 @@ const int16_t LineSensorMax = 1000;
 QTRSensorsRC lineSensors((unsigned char[]) {14, 15, 16}, NumLineSensors, LineSensorTimeout);
 uint16_t lineSensorValues[NumLineSensors];
 
-const uint16_t MaxSpeed = 255;
-
 DRV8835 driveMotors(7, 5, 8, 6);
-const int16_t maxSpeed = 255;
+const int16_t MaxSpeed = 255;
 
 Encoder lwEnc(18, 19);
 Encoder rwEnc(21, 20);
@@ -63,9 +61,9 @@ void loop()
   if (accel)
   {
     accelMaxSpeed = (millis() - millisInitial) / 4; // 0 to 255 over ~1 second
-    if (accelMaxSpeed >= maxSpeed)
+    if (accelMaxSpeed >= MaxSpeed)
     {
-      accelMaxSpeed = maxSpeed;
+      accelMaxSpeed = MaxSpeed;
       accel = false;
     }
   }
