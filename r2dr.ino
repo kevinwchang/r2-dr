@@ -14,6 +14,7 @@ uint16_t lineSensorValues[NumLineSensors];
 const uint16_t MaxSpeed = 255;
 
 DRV8835 driveMotors(7, 5, 8, 6);
+const int16_t maxSpeed = 255;
 
 Encoder lwEnc(18, 19);
 Encoder rwEnc(21, 20);
@@ -37,6 +38,8 @@ int32_t x = 0, y = 0;
 
 #define sign(x) ((x) < 0 ? -1 : 1)
 
+void followLine(int16_t accelMaxSpeed = 255);
+
 void setup()
 {
   Serial.begin(115200);
@@ -50,13 +53,22 @@ void setup()
 
 void loop()
 {
-  //Serial.print(lwEnc.read());Serial.print("\t");Serial.println(rwEnc.read());delay(100);return;
-  //static int count=0;count++;updateWheelEncoders();if(count>100){printDebug();count=0;}return;
   static uint16_t millisInitial = 0;
-  static int16_t lsInitial, rsInitial;
+  static boolean accel = false;
+  static int16_t accelMaxSpeed = 0;
   
   if (state != WaitForButton && state != Done)
     updateWheelEncoders();
+  
+  if (accel)
+  {
+    accelMaxSpeed = (millis() - millisInitial) / 4; // 0 to 255 over ~1 second
+    if (accelMaxSpeed >= maxSpeed)
+    {
+      accelMaxSpeed = maxSpeed;
+      accel = false;
+    }
+  }
   
   switch(state)
   {
@@ -67,15 +79,15 @@ void loop()
       lwEnc.write(0);
       rwEnc.write(0);
       state = FindLine;
+      accel = true;
       millisInitial = millis();
     }
     break;
 
     case FindLine:
     {
-      int16_t s = (millis() - millisInitial) / 4;
-      if (s <= MaxSpeed)
-        driveMotors.setSpeeds(s, s);
+      driveMotors.setSpeeds(accelMaxSpeed, accelMaxSpeed);
+
         
       lineSensors.readCalibrated(lineSensorValues);
       if (onLine())
@@ -88,7 +100,7 @@ void loop()
       
     case StartFollowLine:
     {
-      followLine();
+      followLine(accelMaxSpeed);
       if ((millis() - millisInitial) > 2000)
       {
         state = FollowLine;
@@ -110,8 +122,6 @@ void loop()
         
         state = GoHome;
         millisInitial = millis();
-        lsInitial = ls;
-        rsInitial = rs;
         digitalWrite(13, LOW);
       }
     }
@@ -256,10 +266,11 @@ boolean onLine()
   return (lineSensorValues[0] > 500) || (lineSensorValues[1] > 500) || (lineSensorValues[2] > 500);
 }
 
-void followLine()
+void followLine(int16_t accelMaxSpeed)
 {
   static uint16_t last_proportional = 0;
   static long integral = 0;
+  static const int16_t lfMaxSpeed = accelMaxSpeed, lfMaxDiff = accelMaxSpeed;
   
   // Get the position of the line.  Note that we *must* provide
   // the "sensors" argument to read_line() here, even though we
@@ -286,21 +297,20 @@ void followLine()
 
   // Compute the actual motor settings.  We never set either motor
   // to a negative value.
-  const int16_t MaxDiff = MaxSpeed;
-  if(power_difference > MaxDiff)
-    power_difference = MaxDiff;
-  if(power_difference < -MaxDiff)
-    power_difference = -MaxDiff;
+  if(power_difference > lfMaxDiff)
+    power_difference = lfMaxDiff;
+  if(power_difference < -lfMaxDiff)
+    power_difference = -lfMaxDiff;
 
   if(power_difference < 0)
   {
-    ls = MaxSpeed + power_difference;
-    rs = MaxSpeed;
+    ls = lfMaxSpeed + power_difference;
+    rs = lfMaxSpeed;
   }
   else
   {
-    ls = MaxSpeed;
-    rs = MaxSpeed - power_difference;
+    ls = lfMaxSpeed;
+    rs = lfMaxSpeed - power_difference;
   }
   driveMotors.setSpeeds(ls, rs);
 }
