@@ -12,7 +12,7 @@ QTRSensorsRC lineSensors((unsigned char[]) {14, 15, 16}, NumLineSensors, LineSen
 uint16_t lineSensorValues[NumLineSensors];
 
 DRV8835 driveMotors(7, 5, 8, 6);
-const int16_t MaxSpeed = 255;
+const int16_t MaxSpeed = 200;
 
 Encoder lwEnc(18, 19);
 Encoder rwEnc(21, 20);
@@ -24,9 +24,9 @@ enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } stat
 int16_t ls, rs;
 
 const uint16_t AngleScale = 20000;
-const uint16_t StepsPerRadian = 1025;
-const uint8_t LeapTickPerL = 0;
-const uint8_t LeapTickPerR = 200;
+const uint16_t StepsPerRadian = 1050;
+const uint16_t LeapTickPerL = 0;
+const uint16_t LeapTickPerR = 0;
 const int32_t FollowMaxY = 13000000L;
 const int16_t FollowMaxS = 15000L;
 
@@ -36,7 +36,7 @@ int32_t x = 0, y = 0;
 
 #define sign(x) ((x) < 0 ? -1 : 1)
 
-void followLine(int16_t accelMaxSpeed = 255);
+void followLine(int16_t accelMaxSpeed = MaxSpeed);
 
 void setup()
 {
@@ -51,8 +51,9 @@ void setup()
 
 void loop()
 {
-  static uint16_t millisInitial = 0;
+  static uint16_t stateStartMillis = 0;
   static boolean accel = false;
+  static uint16_t accelStartMillis = 0;
   static int16_t accelMaxSpeed = 0;
   
   if (state != WaitForButton && state != Done)
@@ -60,7 +61,7 @@ void loop()
   
   if (accel)
   {
-    accelMaxSpeed = (millis() - millisInitial) / 4; // 0 to 255 over ~1 second
+    accelMaxSpeed = (millis() - accelStartMillis) / 4; // 0 to 255 over ~1 second
     if (accelMaxSpeed >= MaxSpeed)
     {
       accelMaxSpeed = MaxSpeed;
@@ -78,20 +79,19 @@ void loop()
       rwEnc.write(0);
       state = FindLine;
       accel = true;
-      millisInitial = millis();
+      accelStartMillis = millis();
     }
     break;
 
     case FindLine:
     {
       driveMotors.setSpeeds(accelMaxSpeed, accelMaxSpeed);
-
         
       lineSensors.readCalibrated(lineSensorValues);
       if (onLine())
       {
         state = StartFollowLine;
-        millisInitial = millis();
+        stateStartMillis = millis();
       }
     }
     break;
@@ -99,7 +99,7 @@ void loop()
     case StartFollowLine:
     {
       followLine(accelMaxSpeed);
-      if ((millis() - millisInitial) > 2000)
+      if ((millis() - stateStartMillis) > 2000)
       {
         state = FollowLine;
         digitalWrite(13, HIGH);
@@ -119,7 +119,7 @@ void loop()
         printDebug();
         
         state = GoHome;
-        millisInitial = millis();
+        stateStartMillis = millis();
         digitalWrite(13, LOW);
       }
     }
@@ -128,7 +128,7 @@ void loop()
     case GoHome:
     {
       goHome();
-      if(x > -5000000)
+      if(x > -1000000)
       {
         state = Done;
       }
@@ -157,7 +157,7 @@ void setLineSensorCalibration()
 void updateWheelEncoders()
 {
   static int8_t prevLCount = 0, prevRCount = 0;
-  static uint8_t leapLCount = 0, leapRCount = 0;
+  static uint16_t leapLCount = 0, leapRCount = 0;
   
   int8_t dLCount = (int8_t)(lwEnc.read() - prevLCount);
   int8_t dRCount = (int8_t)(rwEnc.read() - prevRCount);
@@ -240,7 +240,7 @@ void goHome()
   int32_t err;
   
   if(x > -20000000)
-    speed = min(MaxSpeed/2, speed);
+    speed = speed/2;
   
   if(c < 0)
   {
@@ -291,7 +291,7 @@ void followLine(int16_t accelMaxSpeed)
   // to the right.  If it is a negative number, the robot will
   // turn to the left, and the magnitude of the number determines
   // the sharpness of the turn.
-  int16_t power_difference = proportional/4;// + derivative*6;
+  int16_t power_difference = proportional/4 + derivative*4;
 
   // Compute the actual motor settings.  We never set either motor
   // to a negative value.
