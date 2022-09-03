@@ -24,9 +24,9 @@ enum { WaitForButton, FindLine, StartFollowLine, FollowLine, GoHome, Done } stat
 int16_t ls, rs;
 
 const uint16_t AngleScale = 20000;
-const uint16_t StepsPerRadian = 1050;
+const uint16_t StepsPerRadian = 1000;
 const uint16_t LeapTickPerL = 0;
-const uint16_t LeapTickPerR = 0;
+const uint16_t LeapTickPerR = 150;
 const int32_t FollowMaxY = 13000000L;
 const int16_t FollowMaxS = 15000L;
 
